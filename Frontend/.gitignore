@@ -1,0 +1,194 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+vendor/
+bower_components/
+jspm_packages/
+web_modules/
+
+# Package manager lock noise (keep YOUR lockfile, drop foreign ones)
+# Uncomment the ones your project does not use:
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+# bun.lockb
+
+# Build output
+dist/
+build/
+out/
+output/
+public/build/
+.output/
+.nuxt/
+.next/
+.svelte-kit/
+.astro/
+.docusaurus/
+.vuepress/dist/
+.solid/
+.vinxi/
+.tanstack/
+.angular/
+.quasar/
+.expo/
+.expo-shared/
+storybook-static/
+.parcel-cache/
+.rspack/
+.turbo/
+.vercel/
+.netlify/
+.wrangler/
+.serverless/
+.firebase/
+.amplify/
+.vite/
+*.tsbuildinfo
+.tscache/
+.rollup.cache/
+.swc/
+.rolldown-cache/
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+!.env.template
+!.env.sample
+*.pem
+*.key
+*.p12
+*.keystore
+*.jks
+secrets.json
+.npmrc
+.yarnrc
+.netrc
+
+# Testing & coverage
+coverage/
+.nyc_output/
+*.lcov
+test-results/
+playwright-report/
+playwright/.cache/
+blob-report/
+cypress/screenshots/
+cypress/videos/
+cypress/downloads/
+.vitest-cache/
+__snapshots__/*.snap.new
+.stryker-tmp/
+
+# Caches & temp
+.cache/
+.temp/
+.tmp/
+tmp/
+temp/
+*.tsbuildinfo
+.eslintcache
+.stylelintcache
+.prettiercache
+.sass-cache/
+*.css.map
+*.js.map
+!*.min.js.map
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.pnpm-debug.log*
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Editors & IDE
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+.history/
+*.sublime-project
+*.sublime-workspace
+.fleet/
+.zed/
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Tooling runtime state
+.node_repl_history
+.yarn-integrity
+.grunt
+.lock-wscript
+.webpack/
+.husky/_/
+.changeset/pre.json
+.tool-versions.local
+.nvmrc.local
+.direnv/
+
+# Generated / bundle analysis
+stats.html
+stats.json
+bundle-stats.json
+*.bundle-analysis.json
+.lighthouseci/
+
+# Local DB / fixtures scratch
+*.sqlite
+*.sqlite3
+*.db-journal
+.local/
+
+# Mobile native build artifacts (RN / Capacitor / Cordova)
+ios/Pods/
+ios/build/
+ios/.xcode.env.local
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+*.apk
+*.aab
+*.ipa
+.cxx/
+
+# Desktop (Electron / Tauri)
+release/
+src-tauri/target/
+out-electron/
+
+# Misc
+.vercel
+.turbo
+*.tgz
+*.zip
+*.tar.gz
+!assets/**/*.zip
