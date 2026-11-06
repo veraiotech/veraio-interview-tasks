@@ -23,6 +23,13 @@ builder.Services.AddOpenApi();
 
 var app = builder.Build();
 
+if (args.Contains("seed"))
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    await DatabaseSeeder.SeedAsync(scope.ServiceProvider.GetRequiredService<AppDbContext>());
+    return;
+}
+
 if (!app.Environment.IsProduction())
 {
     app.MapOpenApi();
