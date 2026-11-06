@@ -1,5 +1,7 @@
 using AccountDeposits.Api.Configuration;
+using AccountDeposits.Api.Persistence;
 using DotNetEnv;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,12 +13,15 @@ if (!builder.Environment.IsEnvironment("Testing"))
     builder.Configuration.AddEnvironmentVariables();
 }
 
+// Stops the service at startup when a required setting is missing.
+var connectionString = DatabaseSettings.GetConnectionString(builder.Configuration);
+
+builder.Services.AddDbContext<AppDbContext>(options => options
+    .UseNpgsql(connectionString)
+    .UseSnakeCaseNamingConvention());
 builder.Services.AddOpenApi();
 
 var app = builder.Build();
-
-// Stops the service at startup when a required setting is missing.
-var connectionString = DatabaseSettings.GetConnectionString(app.Configuration);
 
 if (!app.Environment.IsProduction())
 {
