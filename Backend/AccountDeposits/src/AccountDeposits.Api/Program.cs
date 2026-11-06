@@ -1,5 +1,8 @@
+using System.Text.Json.Serialization;
 using AccountDeposits.Api.Configuration;
+using AccountDeposits.Api.Errors;
 using AccountDeposits.Api.Persistence;
+using AccountDeposits.Api.Services;
 using DotNetEnv;
 using Microsoft.EntityFrameworkCore;
 
@@ -19,6 +22,10 @@ var connectionString = DatabaseSettings.GetConnectionString(builder.Configuratio
 builder.Services.AddDbContext<AppDbContext>(options => options
     .UseNpgsql(connectionString)
     .UseSnakeCaseNamingConvention());
+builder.Services.AddScoped<AccountService>();
+builder.Services.AddControllers()
+    .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+builder.Services.AddErrorHandling();
 builder.Services.AddOpenApi();
 
 var app = builder.Build();
@@ -30,9 +37,14 @@ if (args.Contains("seed"))
     return;
 }
 
+app.UseExceptionHandler();
+app.UseStatusCodePages();
+
 if (!app.Environment.IsProduction())
 {
     app.MapOpenApi();
 }
+
+app.MapControllers();
 
 app.Run();
