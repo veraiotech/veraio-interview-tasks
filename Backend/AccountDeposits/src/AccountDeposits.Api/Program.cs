@@ -3,6 +3,7 @@ using AccountDeposits.Api.Configuration;
 using AccountDeposits.Api.Errors;
 using AccountDeposits.Api.Persistence;
 using AccountDeposits.Api.Services;
+using AccountDeposits.Api.Services.Money;
 using DotNetEnv;
 using Microsoft.EntityFrameworkCore;
 
@@ -23,6 +24,11 @@ builder.Services.AddDbContext<AppDbContext>(options => options
     .UseNpgsql(connectionString)
     .UseSnakeCaseNamingConvention());
 builder.Services.AddScoped<AccountService>();
+builder.Services.AddHttpClient<IExchangeRateProvider, FrankfurterExchangeRateProvider>(client =>
+{
+    client.BaseAddress = FrankfurterExchangeRateProvider.BaseAddress;
+    client.Timeout = TimeSpan.FromSeconds(5);
+});
 builder.Services.AddControllers()
     .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddErrorHandling();
