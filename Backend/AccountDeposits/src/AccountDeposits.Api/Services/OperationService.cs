@@ -16,7 +16,7 @@ public sealed class OperationService(AppDbContext db, IExchangeRateProvider rate
     public async Task<OperationResponse> DepositAsync(long userId, long accountId, decimal amount, CancellationToken cancellationToken)
     {
         EnsureValidAmount(amount);
-        var currency = await GetAccountCurrencyAsync(userId, accountId, cancellationToken);
+        var (currency, _) = await GetAccountDetailsAsync(userId, accountId, cancellationToken);
         var ratePerEur = await GetRatePerEurAsync(currency, cancellationToken);
         var fee = FeeCalculator.Deposit(amount, ratePerEur);
 
@@ -25,7 +25,33 @@ public sealed class OperationService(AppDbContext db, IExchangeRateProvider rate
             var account = await db.Accounts.SingleAsync(account => account.Id == accountId, cancellationToken);
             account.Balance += amount - fee;
 
-            var operation = Record(account.Id, OperationType.Deposit, amount, fee, account.Balance, ratePerEur);
+            var operation = AddOperation(
+                account.Id, OperationType.Deposit, amount, fee, account.Balance, ratePerEur, timeProvider.GetUtcNow());
+            await db.SaveChangesAsync(cancellationToken);
+
+            return new OperationResponse(operation.Reference, fee, account.Currency, account.Balance);
+        }, cancellationToken);
+    }
+
+    public async Task<OperationResponse> WithdrawAsync(long userId, long accountId, decimal amount, CancellationToken cancellationToken)
+    {
+        EnsureValidAmount(amount);
+        var (currency, userType) = await GetAccountDetailsAsync(userId, accountId, cancellationToken);
+        var ratePerEur = await GetRatePerEurAsync(currency, cancellationToken);
+
+        return await InTransactionAsync([userId], async () =>
+        {
+            // One timestamp for the whole operation, so the week used for the fee is the week it is recorded in.
+            var now = timeProvider.GetUtcNow();
+            var fee = userType == UserType.Basic
+                ? FeeCalculator.BasicOutgoing(amount, ratePerEur)
+                : FeeCalculator.PremiumOutgoing(amount, ratePerEur, await GetWeeklyUsageAsync(userId, now, cancellationToken));
+
+            var account = await db.Accounts.SingleAsync(account => account.Id == accountId, cancellationToken);
+            EnsureSufficientBalance(account, amount + fee);
+            account.Balance -= amount + fee;
+
+            var operation = AddOperation(account.Id, OperationType.Withdrawal, amount, fee, account.Balance, ratePerEur, now);
             await db.SaveChangesAsync(cancellationToken);
 
             return new OperationResponse(operation.Reference, fee, account.Currency, account.Balance);
@@ -38,7 +64,6 @@ public sealed class OperationService(AppDbContext db, IExchangeRateProvider rate
     /// id order, so two transactions cannot deadlock. Concurrent operations of the same user therefore run one after
     /// another. Any exception rolls everything back, so a refused operation leaves no trace.
     /// </summary>
-    /// 
     private async Task<T> InTransactionAsync<T>(long[] userIds, Func<Task<T>> work, CancellationToken cancellationToken)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
@@ -51,10 +76,10 @@ public sealed class OperationService(AppDbContext db, IExchangeRateProvider rate
         return result;
     }
 
-    private Operation Record(
-        long accountId, OperationType type, decimal amount, decimal fee, decimal balanceAfter, decimal ratePerEur)
+    private Operation AddOperation(
+        long accountId, OperationType type, decimal amount, decimal fee, decimal balanceAfter, decimal ratePerEur,
+        DateTimeOffset occurredAt)
     {
-        var occurredAt = timeProvider.GetUtcNow();
         var operation = new Operation
         {
             Reference = Guid.CreateVersion7(occurredAt),
@@ -71,15 +96,62 @@ public sealed class OperationService(AppDbContext db, IExchangeRateProvider rate
         return operation;
     }
 
-    private async Task<Currency> GetAccountCurrencyAsync(long userId, long accountId, CancellationToken cancellationToken)
+    /// <summary>
+    /// Reads only values that never change. The balance is read again inside the locked transaction,
+    /// so this lookup can safely run before it.
+    /// </summary>
+    private async Task<(Currency Currency, UserType UserType)> GetAccountDetailsAsync(
+        long userId, long accountId, CancellationToken cancellationToken)
     {
-        // Not tracked, so the locked transaction below reads the account again instead of reusing this stale copy.
         var account = await db.Accounts
-            .AsNoTracking()
-            .SingleOrDefaultAsync(account => account.Id == accountId && account.UserId == userId, cancellationToken);
+            .Where(account => account.Id == accountId && account.UserId == userId)
+            .Select(account => new { account.Currency, account.User.Type })
+            .SingleOrDefaultAsync(cancellationToken);
 
-        return account?.Currency ?? throw new ApiException(
-            StatusCodes.Status404NotFound, "ACCOUNT_NOT_FOUND", $"Account {accountId} does not exist for user {userId}.");
+        return account is null
+            ? throw new ApiException(
+                StatusCodes.Status404NotFound, "ACCOUNT_NOT_FOUND", $"Account {accountId} does not exist for user {userId}.")
+            : (account.Currency, account.Type);
+    }
+
+    /// <summary>
+    /// The user's withdrawals and outgoing transfers in the current calendar week, Monday 00:00 to Sunday 23:59:59 UTC.
+    /// Both queries run inside the locked transaction, so no operation of the user can be recorded between them.
+    /// </summary>
+    private async Task<WeeklyUsage> GetWeeklyUsageAsync(long userId, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var weekStart = StartOfWeek(now);
+        var nextWeekStart = weekStart.AddDays(7);
+
+        var operations = db.Operations.Where(operation =>
+            operation.Account.UserId == userId
+            && (operation.Type == OperationType.Withdrawal || operation.Type == OperationType.TransferOut)
+            && operation.OccurredAt >= weekStart
+            && operation.OccurredAt < nextWeekStart);
+
+        var count = await operations.CountAsync(cancellationToken);
+        var amountInEur = await operations.SumAsync(operation => operation.Amount / operation.RatePerEur, cancellationToken);
+
+        return new WeeklyUsage(count, amountInEur);
+    }
+
+    private static DateTimeOffset StartOfWeek(DateTimeOffset now)
+    {
+        var today = now.UtcDateTime.Date;
+        var daysSinceMonday = ((int)today.DayOfWeek + 6) % 7;
+        return new DateTimeOffset(today.AddDays(-daysSinceMonday), TimeSpan.Zero);
+    }
+
+    private static void EnsureSufficientBalance(Account account, decimal debit)
+    {
+        if (debit > account.Balance)
+        {
+            throw new ApiException(
+                StatusCodes.Status422UnprocessableEntity,
+                "INSUFFICIENT_FUNDS",
+                FormattableString.Invariant(
+                    $"Amount plus fee is {debit:N2} {account.Currency}, but the balance is {account.Balance:N2} {account.Currency}."));
+        }
     }
 
     /// <summary>EUR accounts need no conversion, so they keep working when the rates are unavailable.</summary>
