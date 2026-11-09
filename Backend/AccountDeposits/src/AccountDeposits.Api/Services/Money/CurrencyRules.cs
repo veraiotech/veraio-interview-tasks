@@ -14,9 +14,16 @@ public static class CurrencyRules
     public static decimal RoundUp(decimal amount) =>
         Math.Round(Math.Round(amount, NoiseFreeDecimals), Decimals, MidpointRounding.ToPositiveInfinity);
 
-    /// <summary>Rounds a transfer credit down, so the receiver is never overpaid...</summary>
+    /// <summary>Rounds a transfer credit down, so the receiver is never overpaid.</summary>
     public static decimal RoundDown(decimal amount) =>
         Math.Round(Math.Round(amount, NoiseFreeDecimals), Decimals, MidpointRounding.ToNegativeInfinity);
+
+    /// <summary>
+    /// The amount a transfer credits the receiver, rounded down so the receiver is never overpaid.
+    /// Multiplies before dividing, so the single division adds as little rounding noise as possible.
+    /// </summary>
+    public static decimal ReceivedAmount(decimal amount, decimal senderRatePerEur, decimal receiverRatePerEur) =>
+        RoundDown(amount * receiverRatePerEur / senderRatePerEur);
 
     /// <summary>The smallest amount in the sender's currency that credits the receiver at least one cent.</summary>
     public static decimal MinimumTransferAmount(decimal senderRatePerEur, decimal receiverRatePerEur) =>

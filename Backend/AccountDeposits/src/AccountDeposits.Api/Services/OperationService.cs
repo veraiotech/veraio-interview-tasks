@@ -73,7 +73,7 @@ public sealed class OperationService(AppDbContext db, IExchangeRateProvider rate
 
         var (senderRatePerEur, receiverRatePerEur) =
             await GetTransferRatesAsync(senderCurrency, receiverCurrency, cancellationToken);
-        var receivedAmount = CurrencyRules.RoundDown(amount * receiverRatePerEur / senderRatePerEur);
+        var receivedAmount = CurrencyRules.ReceivedAmount(amount, senderRatePerEur, receiverRatePerEur);
         EnsureReceiverGetsAtLeastOneCent(
             receivedAmount, senderRatePerEur, receiverRatePerEur, senderCurrency, receiverCurrency);
 

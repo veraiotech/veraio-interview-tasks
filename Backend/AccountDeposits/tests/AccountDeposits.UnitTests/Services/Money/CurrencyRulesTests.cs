@@ -34,6 +34,15 @@ public sealed class CurrencyRulesTests
         { 10.005m, false },
     };
 
+    public static TheoryData<decimal, decimal, decimal, decimal> ReceivedAmountCases => new()
+    {
+        // Section 4.4: amount sent, sender rate, receiver rate, amount received
+        { 110.00m, UsdPerEur, EurPerEur, 100.00m },
+        { 100.00m, UsdPerEur, GbpPerEur, 77.27m },
+        { 10.01m, EurPerEur, UsdPerEur, 11.01m },
+        { 50.00m, EurPerEur, EurPerEur, 50.00m },
+    };
+
     public static TheoryData<decimal, decimal, decimal> MinimumTransferCases => new()
     {
         // sender rate, receiver rate, minimum amount in the sender's currency
@@ -70,6 +79,12 @@ public sealed class CurrencyRulesTests
     }
 
     [Theory]
+    [MemberData(nameof(ReceivedAmountCases))]
+    public void ReceivedAmount_reproduces_the_transfer_examples(
+        decimal amount, decimal senderRatePerEur, decimal receiverRatePerEur, decimal expected) =>
+        Assert.Equal(expected, CurrencyRules.ReceivedAmount(amount, senderRatePerEur, receiverRatePerEur));
+
+    [Theory]
     [MemberData(nameof(MinimumTransferCases))]
     public void MinimumTransferAmount_is_the_smallest_amount_that_credits_one_cent(
         decimal senderRatePerEur, decimal receiverRatePerEur, decimal expected)
@@ -77,10 +92,8 @@ public sealed class CurrencyRulesTests
         var minimum = CurrencyRules.MinimumTransferAmount(senderRatePerEur, receiverRatePerEur);
 
         Assert.Equal(expected, minimum);
-        Assert.True(Credited(minimum) >= 0.01m);
-        Assert.Equal(0.00m, Credited(minimum - 0.01m));
-
-        decimal Credited(decimal amount) => CurrencyRules.RoundDown(amount * receiverRatePerEur / senderRatePerEur);
+        Assert.True(CurrencyRules.ReceivedAmount(minimum, senderRatePerEur, receiverRatePerEur) >= 0.01m);
+        Assert.Equal(0.00m, CurrencyRules.ReceivedAmount(minimum - 0.01m, senderRatePerEur, receiverRatePerEur));
     }
 
     [Theory]
