@@ -15,4 +15,8 @@ public sealed class OperationsController(OperationService operationService) : Co
     [HttpPost("withdrawals")]
     public Task<OperationResponse> Withdraw(long userId, long accountId, WithdrawalRequest request, CancellationToken cancellationToken) =>
         operationService.WithdrawAsync(userId, accountId, request.Amount, cancellationToken);
+
+    [HttpPost("transfers")]
+    public Task<TransferResponse> Transfer(long userId, long accountId, TransferRequest request, CancellationToken cancellationToken) =>
+        operationService.TransferAsync(userId, accountId, request.ToAccountId, request.Amount, cancellationToken);
 }

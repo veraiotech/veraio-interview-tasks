@@ -25,11 +25,12 @@ public sealed class OperationService(AppDbContext db, IExchangeRateProvider rate
             var account = await db.Accounts.SingleAsync(account => account.Id == accountId, cancellationToken);
             account.Balance += amount - fee;
 
-            var operation = AddOperation(
-                account.Id, OperationType.Deposit, amount, fee, account.Balance, ratePerEur, timeProvider.GetUtcNow());
+            var now = timeProvider.GetUtcNow();
+            var reference = Guid.CreateVersion7(now);
+            AddOperation(reference, account.Id, OperationType.Deposit, amount, fee, account.Balance, ratePerEur, now);
             await db.SaveChangesAsync(cancellationToken);
 
-            return new OperationResponse(operation.Reference, fee, account.Currency, account.Balance);
+            return new OperationResponse(reference, fee, account.Currency, account.Balance);
         }, cancellationToken);
     }
 
@@ -43,18 +44,62 @@ public sealed class OperationService(AppDbContext db, IExchangeRateProvider rate
         {
             // One timestamp for the whole operation, so the week used for the fee is the week it is recorded in.
             var now = timeProvider.GetUtcNow();
-            var fee = userType == UserType.Basic
-                ? FeeCalculator.BasicOutgoing(amount, ratePerEur)
-                : FeeCalculator.PremiumOutgoing(amount, ratePerEur, await GetWeeklyUsageAsync(userId, now, cancellationToken));
+            var fee = await GetOutgoingFeeAsync(userId, userType, amount, ratePerEur, now, cancellationToken);
 
             var account = await db.Accounts.SingleAsync(account => account.Id == accountId, cancellationToken);
             EnsureSufficientBalance(account, amount + fee);
             account.Balance -= amount + fee;
 
-            var operation = AddOperation(account.Id, OperationType.Withdrawal, amount, fee, account.Balance, ratePerEur, now);
+            var reference = Guid.CreateVersion7(now);
+            AddOperation(reference, account.Id, OperationType.Withdrawal, amount, fee, account.Balance, ratePerEur, now);
             await db.SaveChangesAsync(cancellationToken);
 
-            return new OperationResponse(operation.Reference, fee, account.Currency, account.Balance);
+            return new OperationResponse(reference, fee, account.Currency, account.Balance);
+        }, cancellationToken);
+    }
+
+    public async Task<TransferResponse> TransferAsync(
+        long userId, long accountId, long toAccountId, decimal amount, CancellationToken cancellationToken)
+    {
+        EnsureValidAmount(amount);
+        var (senderCurrency, senderType) = await GetAccountDetailsAsync(userId, accountId, cancellationToken);
+        var (receiverId, receiverCurrency) = await GetReceiverAsync(toAccountId, cancellationToken);
+
+        if (receiverId == userId)
+        {
+            throw new ApiException(
+                StatusCodes.Status422UnprocessableEntity, "SELF_TRANSFER", "A user cannot transfer money to themselves.");
+        }
+
+        var (senderRatePerEur, receiverRatePerEur) =
+            await GetTransferRatesAsync(senderCurrency, receiverCurrency, cancellationToken);
+        var receivedAmount = CurrencyRules.RoundDown(amount * receiverRatePerEur / senderRatePerEur);
+        EnsureReceiverGetsAtLeastOneCent(
+            receivedAmount, senderRatePerEur, receiverRatePerEur, senderCurrency, receiverCurrency);
+
+        return await InTransactionAsync([userId, receiverId], async () =>
+        {
+            var now = timeProvider.GetUtcNow();
+            var fee = await GetOutgoingFeeAsync(userId, senderType, amount, senderRatePerEur, now, cancellationToken);
+
+            var senderAccount = await db.Accounts.SingleAsync(account => account.Id == accountId, cancellationToken);
+            var receiverAccount = await db.Accounts.SingleAsync(account => account.Id == toAccountId, cancellationToken);
+            EnsureSufficientBalance(senderAccount, amount + fee);
+            senderAccount.Balance -= amount + fee;
+            receiverAccount.Balance += receivedAmount;
+
+            // Both rows share one reference: it links the two sides, and history finds the counterparty through it.
+            var reference = Guid.CreateVersion7(now);
+            AddOperation(
+                reference, senderAccount.Id, OperationType.TransferOut, amount, fee, senderAccount.Balance,
+                senderRatePerEur, now);
+            AddOperation(
+                reference, receiverAccount.Id, OperationType.TransferIn, receivedAmount, 0m, receiverAccount.Balance,
+                receiverRatePerEur, now);
+            await db.SaveChangesAsync(cancellationToken);
+
+            return new TransferResponse(
+                reference, fee, senderAccount.Currency, senderAccount.Balance, receivedAmount, receiverAccount.Currency);
         }, cancellationToken);
     }
 
@@ -76,13 +121,12 @@ public sealed class OperationService(AppDbContext db, IExchangeRateProvider rate
         return result;
     }
 
-    private Operation AddOperation(
-        long accountId, OperationType type, decimal amount, decimal fee, decimal balanceAfter, decimal ratePerEur,
-        DateTimeOffset occurredAt)
-    {
-        var operation = new Operation
+    private void AddOperation(
+        Guid reference, long accountId, OperationType type, decimal amount, decimal fee, decimal balanceAfter,
+        decimal ratePerEur, DateTimeOffset occurredAt) =>
+        db.Operations.Add(new Operation
         {
-            Reference = Guid.CreateVersion7(occurredAt),
+            Reference = reference,
             AccountId = accountId,
             Type = type,
             Amount = amount,
@@ -90,11 +134,14 @@ public sealed class OperationService(AppDbContext db, IExchangeRateProvider rate
             BalanceAfter = balanceAfter,
             RatePerEur = ratePerEur,
             OccurredAt = occurredAt,
-        };
+        });
 
-        db.Operations.Add(operation);
-        return operation;
-    }
+    /// <summary>The fee for a withdrawal or an outgoing transfer. Premium users need their weekly usage for it.</summary>
+    private async Task<decimal> GetOutgoingFeeAsync(
+        long userId, UserType userType, decimal amount, decimal ratePerEur, DateTimeOffset now, CancellationToken cancellationToken) =>
+        userType == UserType.Basic
+            ? FeeCalculator.BasicOutgoing(amount, ratePerEur)
+            : FeeCalculator.PremiumOutgoing(amount, ratePerEur, await GetWeeklyUsageAsync(userId, now, cancellationToken));
 
     /// <summary>
     /// Reads only values that never change. The balance is read again inside the locked transaction,
@@ -112,6 +159,20 @@ public sealed class OperationService(AppDbContext db, IExchangeRateProvider rate
             ? throw new ApiException(
                 StatusCodes.Status404NotFound, "ACCOUNT_NOT_FOUND", $"Account {accountId} does not exist for user {userId}.")
             : (account.Currency, account.Type);
+    }
+
+    /// <summary>The owner and currency of the receiving account. Like the sender's details, they never change.</summary>
+    private async Task<(long UserId, Currency Currency)> GetReceiverAsync(long accountId, CancellationToken cancellationToken)
+    {
+        var account = await db.Accounts
+            .Where(account => account.Id == accountId)
+            .Select(account => new { account.UserId, account.Currency })
+            .SingleOrDefaultAsync(cancellationToken);
+
+        return account is null
+            ? throw new ApiException(
+                StatusCodes.Status404NotFound, "RECEIVER_ACCOUNT_NOT_FOUND", $"Receiver account {accountId} does not exist.")
+            : (account.UserId, account.Currency);
     }
 
     /// <summary>
@@ -157,6 +218,38 @@ public sealed class OperationService(AppDbContext db, IExchangeRateProvider rate
     /// <summary>EUR accounts need no conversion, so they keep working when the rates are unavailable.</summary>
     private async Task<decimal> GetRatePerEurAsync(Currency currency, CancellationToken cancellationToken) =>
         currency == Currency.EUR ? 1m : (await rateProvider.GetRatesAsync(cancellationToken)).PerEur(currency);
+
+    /// <summary>Both rates from one call, which is skipped when both accounts are in EUR.</summary>
+    private async Task<(decimal From, decimal To)> GetTransferRatesAsync(Currency from, Currency to, CancellationToken cancellationToken)
+    {
+        if (from == Currency.EUR && to == Currency.EUR)
+        {
+            return (1m, 1m);
+        }
+
+        var rates = await rateProvider.GetRatesAsync(cancellationToken);
+        return (rates.PerEur(from), rates.PerEur(to));
+    }
+
+    /// <summary>
+    /// Refuses a transfer that would credit less than 0.01, and names the smallest amount that credits at least that.
+    /// </summary>
+    private static void EnsureReceiverGetsAtLeastOneCent(
+        decimal receivedAmount, decimal senderRatePerEur, decimal receiverRatePerEur, Currency senderCurrency,
+        Currency receiverCurrency)
+    {
+        if (receivedAmount > 0)
+        {
+            return;
+        }
+
+        var minimumAmount = CurrencyRules.MinimumTransferAmount(senderRatePerEur, receiverRatePerEur);
+        throw new ApiException(
+            StatusCodes.Status422UnprocessableEntity,
+            "TRANSFER_AMOUNT_TOO_SMALL",
+            FormattableString.Invariant(
+                $"The receiver would get less than 0.01 {receiverCurrency}. The minimum amount for this transfer is {minimumAmount:N2} {senderCurrency}."));
+    }
 
     private static void EnsureValidAmount(decimal amount)
     {

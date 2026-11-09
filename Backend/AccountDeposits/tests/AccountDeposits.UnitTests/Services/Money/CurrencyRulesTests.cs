@@ -4,6 +4,11 @@ namespace AccountDeposits.UnitTests.Services.Money;
 
 public sealed class CurrencyRulesTests
 {
+    // The rates from Task.md section 4: 1 EUR = 1.10 USD = 0.85 GBP.
+    private const decimal EurPerEur = 1m;
+    private const decimal UsdPerEur = 1.10m;
+    private const decimal GbpPerEur = 0.85m;
+
     public static TheoryData<decimal, decimal> RoundUpCases => new()
     {
         { 1.661m, 1.67m },
@@ -27,6 +32,15 @@ public sealed class CurrencyRulesTests
         { -5m, false },
         { 10.001m, false },
         { 10.005m, false },
+    };
+
+    public static TheoryData<decimal, decimal, decimal> MinimumTransferCases => new()
+    {
+        // sender rate, receiver rate, minimum amount in the sender's currency
+        { UsdPerEur, GbpPerEur, 0.02m },
+        { UsdPerEur, EurPerEur, 0.02m },
+        { EurPerEur, UsdPerEur, 0.01m },
+        { GbpPerEur, EurPerEur, 0.01m },
     };
 
     [Theory]
@@ -53,6 +67,20 @@ public sealed class CurrencyRulesTests
         var credited = 1m / 3m * 3m;
 
         Assert.Equal(1.00m, CurrencyRules.RoundDown(credited));
+    }
+
+    [Theory]
+    [MemberData(nameof(MinimumTransferCases))]
+    public void MinimumTransferAmount_is_the_smallest_amount_that_credits_one_cent(
+        decimal senderRatePerEur, decimal receiverRatePerEur, decimal expected)
+    {
+        var minimum = CurrencyRules.MinimumTransferAmount(senderRatePerEur, receiverRatePerEur);
+
+        Assert.Equal(expected, minimum);
+        Assert.True(Credited(minimum) >= 0.01m);
+        Assert.Equal(0.00m, Credited(minimum - 0.01m));
+
+        decimal Credited(decimal amount) => CurrencyRules.RoundDown(amount * receiverRatePerEur / senderRatePerEur);
     }
 
     [Theory]
