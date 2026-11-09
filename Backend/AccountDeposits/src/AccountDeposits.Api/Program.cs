@@ -23,7 +23,9 @@ var connectionString = DatabaseSettings.GetConnectionString(builder.Configuratio
 builder.Services.AddDbContext<AppDbContext>(options => options
     .UseNpgsql(connectionString)
     .UseSnakeCaseNamingConvention());
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<AccountService>();
+builder.Services.AddScoped<OperationService>();
 builder.Services.AddHttpClient<IExchangeRateProvider, FrankfurterExchangeRateProvider>(client =>
 {
     client.BaseAddress = FrankfurterExchangeRateProvider.BaseAddress;

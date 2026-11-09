@@ -10,5 +10,5 @@ public sealed class Account
 
     public required Currency Currency { get; init; }
 
-    public decimal Balance { get; init; }
+    public decimal Balance { get; set; }
 }
