@@ -6,8 +6,8 @@ using Npgsql;
 
 namespace AccountDeposits.E2ETests;
 
-public sealed class DatabaseSchemaTests(AccountDepositsApiFactory factory)
-    : IClassFixture<AccountDepositsApiFactory>, IDisposable
+[Collection(ApiCollection.Name)]
+public sealed class DatabaseSchemaTests(AccountDepositsApiFactory factory) : IDisposable
 {
     private const string CheckViolation = "23514";
 
@@ -28,13 +28,16 @@ public sealed class DatabaseSchemaTests(AccountDepositsApiFactory factory)
 
         Assert.Contains("users", tables);
         Assert.Contains("accounts", tables);
+        Assert.Contains("operations", tables);
     }
 
     [Fact]
     public async Task Balance_cannot_be_negative()
     {
-        Db.Users.Add(new User { Id = 1, Name = "Test user", Type = UserType.Basic });
-        Db.Accounts.Add(new Account { Id = 1, UserId = 1, Currency = Currency.EUR, Balance = -0.01m });
+        // Ids far from the seeded ones, because this database is shared with the other tests. Nothing stays:
+        // SaveChanges writes both rows in one transaction, so the refused account rolls back the user too.
+        Db.Users.Add(new User { Id = 1000, Name = "Test user", Type = UserType.Basic });
+        Db.Accounts.Add(new Account { Id = 1000, UserId = 1000, Currency = Currency.EUR, Balance = -0.01m });
 
         var exception = await Assert.ThrowsAsync<DbUpdateException>(() => Db.SaveChangesAsync(CancellationToken));
 
