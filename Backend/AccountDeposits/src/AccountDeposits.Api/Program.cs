@@ -26,11 +26,14 @@ builder.Services.AddDbContext<AppDbContext>(options => options
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<OperationService>();
-builder.Services.AddHttpClient<IExchangeRateProvider, FrankfurterExchangeRateProvider>(client =>
+builder.Services.AddHttpClient<FrankfurterClient>(client =>
 {
-    client.BaseAddress = FrankfurterExchangeRateProvider.BaseAddress;
+    client.BaseAddress = FrankfurterClient.BaseAddress;
     client.Timeout = TimeSpan.FromSeconds(5);
 });
+builder.Services.AddSingleton<ExchangeRateStore>();
+builder.Services.AddSingleton<IExchangeRateProvider>(services => services.GetRequiredService<ExchangeRateStore>());
+builder.Services.AddHostedService<ExchangeRateRefresher>();
 builder.Services.AddControllers()
     .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddErrorHandling();

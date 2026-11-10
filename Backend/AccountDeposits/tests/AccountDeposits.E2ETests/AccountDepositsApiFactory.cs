@@ -81,6 +81,9 @@ public sealed class AccountDepositsApiFactory : WebApplicationFactory<Program>, 
             services.RemoveAll<TimeProvider>();
             services.AddScoped<TimeProvider>(_ => Clock);
 
+            // No background calls to the real Frankfurter; the fake rates are used instead.
+            services.Remove(services.Single(service => service.ImplementationType == typeof(ExchangeRateRefresher)));
+            services.RemoveAll<ExchangeRateStore>();
             services.RemoveAll<IExchangeRateProvider>();
             services.AddSingleton<IExchangeRateProvider>(Rates);
         });
