@@ -104,6 +104,38 @@ public sealed class OperationService(AppDbContext db, IExchangeRateProvider rate
     }
 
     /// <summary>
+    /// Every operation on the user's accounts, newest first; operations at the same moment keep the order they were
+    /// recorded in. The receiver of a transfer sees its own side, with the sender's account as the counterparty.
+    /// </summary>
+    public async Task<List<OperationHistoryItem>> GetHistoryAsync(long userId, CancellationToken cancellationToken)
+    {
+        if (!await db.Users.AnyAsync(user => user.Id == userId, cancellationToken))
+        {
+            throw new ApiException(StatusCodes.Status404NotFound, "USER_NOT_FOUND", $"User {userId} does not exist.");
+        }
+
+        return await (
+            from operation in db.Operations
+            where operation.Account.UserId == userId
+            // The other side of a transfer shares the reference; deposits and withdrawals have none.
+            from counterpart in db.Operations
+                .Where(other => other.Reference == operation.Reference && other.AccountId != operation.AccountId)
+                .DefaultIfEmpty()
+            orderby operation.OccurredAt descending, operation.Id descending
+            select new OperationHistoryItem(
+                operation.Reference,
+                operation.Type,
+                operation.AccountId,
+                operation.Amount,
+                operation.Account.Currency,
+                operation.Fee,
+                operation.BalanceAfter,
+                operation.OccurredAt,
+                counterpart == null ? null : counterpart.AccountId))
+            .ToListAsync(cancellationToken);
+    }
+
+    /// <summary>
     /// Runs <paramref name="work"/> in one transaction after locking the given users' rows. Every balance change
     /// must lock the account owner's row, so a transfer locks both the sender and the receiver. Locks are taken in
     /// id order, so two transactions cannot deadlock. Concurrent operations of the same user therefore run one after

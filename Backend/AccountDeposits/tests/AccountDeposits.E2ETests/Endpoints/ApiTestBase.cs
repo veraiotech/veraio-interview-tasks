@@ -72,6 +72,9 @@ public abstract class ApiTestBase(AccountDepositsApiFactory factory) : IAsyncLif
     protected async Task<List<AccountResponse>> GetAccountsAsync(long userId) =>
         (await Client.GetFromJsonAsync<List<AccountResponse>>($"users/{userId}/accounts", JsonOptions, CancellationToken))!;
 
+    protected async Task<List<OperationHistoryItem>> GetHistoryAsync(long userId) =>
+        (await Client.GetFromJsonAsync<List<OperationHistoryItem>>($"users/{userId}/operations", JsonOptions, CancellationToken))!;
+
     protected async Task<decimal> GetBalanceAsync(long userId, long accountId) =>
         (await GetAccountsAsync(userId)).Single(account => account.Id == accountId).Balance;
 
